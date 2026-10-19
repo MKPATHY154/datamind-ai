@@ -55,18 +55,24 @@ def _read_dataset(filename: str, payload: bytes) -> pd.DataFrame:
 
 def _column_summary(frame: pd.DataFrame, name: str) -> dict[str, Any]:
     series = frame[name]
+    is_datetime = str(series.dtype).startswith("datetime")
     missing_count = int(series.isna().sum())
     unique_count = int(series.nunique(dropna=True))
     summary: dict[str, Any] = {
         "name": str(name),
         "dtype": str(series.dtype),
-        "role": "numeric" if pd.api.types.is_numeric_dtype(series) else "categorical",
+        "role": "datetime" if is_datetime else "numeric" if pd.api.types.is_numeric_dtype(series) else "categorical",
         "missing_count": missing_count,
         "missing_percent": round((missing_count / len(frame)) * 100, 2) if len(frame) else 0,
         "unique_count": unique_count,
         "sample_values": [_json_value(value) for value in series.dropna().head(3).tolist()],
     }
-    if pd.api.types.is_numeric_dtype(series):
+    if is_datetime:
+        summary["statistics"] = {
+            "min": _json_value(series.min()),
+            "max": _json_value(series.max()),
+        }
+    elif pd.api.types.is_numeric_dtype(series):
         summary["statistics"] = {
             "min": _json_value(series.min()),
             "max": _json_value(series.max()),
@@ -79,6 +85,21 @@ def _column_summary(frame: pd.DataFrame, name: str) -> dict[str, Any]:
             {"value": str(value), "count": int(count)} for value, count in counts.items()
         ]
     return summary
+
+
+def _coerce_datetime_columns(frame: pd.DataFrame) -> list[str]:
+    """Convert columns that are overwhelmingly date-like into datetimes."""
+    datetime_columns: list[str] = []
+    for name in frame.columns:
+        series = frame[name]
+        if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_datetime64_any_dtype(series):
+            continue
+        parsed = pd.to_datetime(series, errors="coerce", format="mixed")
+        non_empty = series.notna().sum()
+        if non_empty and (parsed.notna().sum() / non_empty) >= 0.8:
+            frame[name] = parsed
+            datetime_columns.append(str(name))
+    return datetime_columns
 
 
 def _insights(
@@ -142,11 +163,13 @@ async def profile_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
 
     # Keep response keys stable even when a spreadsheet has numeric headers.
     frame.columns = [str(column) for column in frame.columns]
+    datetime_columns = _coerce_datetime_columns(frame)
 
     row_count, column_count = frame.shape
     numeric_columns = [str(column) for column in frame.select_dtypes(include="number").columns]
     categorical_columns = [
-        str(column) for column in frame.columns if str(column) not in numeric_columns
+        str(column) for column in frame.columns
+        if str(column) not in numeric_columns and str(column) not in datetime_columns
     ]
     missing_cells = int(frame.isna().sum().sum())
     duplicate_count = int(frame.duplicated().sum())
@@ -166,6 +189,7 @@ async def profile_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
             "duplicate_count": duplicate_count,
             "numeric_columns": numeric_columns,
             "categorical_columns": categorical_columns,
+            "datetime_columns": datetime_columns,
         },
         "column_summaries": [_column_summary(frame, str(column)) for column in frame.columns],
         "insights": _insights(frame, numeric_columns, categorical_columns, duplicate_count, missing_cells),

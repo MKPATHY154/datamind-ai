@@ -91,9 +91,10 @@ function renderProfileResults(profile, file) {
   const prep = profile.preprocessing || {};
   const numeric = prep.numeric_columns || [];
   const categorical = prep.categorical_columns || [];
+  const datetime = prep.datetime_columns || [];
   const insights = profile.insights || [];
   const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-  results.innerHTML = `<article class="profile-card"><h3>${escapeHtml(profile.dataset_name || file.name)}</h3><p>Automated profile · cleaned metadata ready</p><div class="profile-stat-row"><div class="profile-stat"><strong>${Number(profile.row_count || 0).toLocaleString()}</strong><span>Rows</span></div><div class="profile-stat"><strong>${Number(profile.column_count || 0).toLocaleString()}</strong><span>Columns</span></div><div class="profile-stat"><strong>${Number(profile.quality_score || 0).toLocaleString()}%</strong><span>Quality</span></div></div><div class="profile-columns">${numeric.map((column) => `<span class="profile-column numeric">${escapeHtml(column)} · numeric</span>`).join('')}${categorical.map((column) => `<span class="profile-column">${escapeHtml(column)} · category</span>`).join('')}</div></article><article class="profile-card"><h3>What DataMind found</h3><p>Signals generated from your first scan</p><div class="profile-insights">${insights.map((insight) => `<div class="profile-insight">${escapeHtml(insight)}</div>`).join('') || '<div class="profile-insight">Your dataset is ready for exploratory analysis.</div>'}</div></article>`;
+  results.innerHTML = `<article class="profile-card"><h3>${escapeHtml(profile.dataset_name || file.name)}</h3><p>Automated profile · cleaned metadata ready</p><div class="profile-stat-row"><div class="profile-stat"><strong>${Number(profile.row_count || 0).toLocaleString()}</strong><span>Rows</span></div><div class="profile-stat"><strong>${Number(profile.column_count || 0).toLocaleString()}</strong><span>Columns</span></div><div class="profile-stat"><strong>${Number(profile.quality_score || 0).toLocaleString()}%</strong><span>Quality</span></div></div><div class="profile-columns">${numeric.map((column) => `<span class="profile-column numeric">${escapeHtml(column)} · numeric</span>`).join('')}${categorical.map((column) => `<span class="profile-column">${escapeHtml(column)} · category</span>`).join('')}${datetime.map((column) => `<span class="profile-column datetime">${escapeHtml(column)} · date</span>`).join('')}</div></article><article class="profile-card"><h3>What DataMind found</h3><p>Signals generated from your first scan</p><div class="profile-insights">${insights.map((insight) => `<div class="profile-insight">${escapeHtml(insight)}</div>`).join('') || '<div class="profile-insight">Your dataset is ready for exploratory analysis.</div>'}</div></article>`;
   results.classList.add('visible');
 }
 
@@ -101,7 +102,10 @@ function updateOverview(profile, file) {
   const data = profile.profile || profile.metrics || profile.dataset || profile;
   const rows = metricValue(data, ['rows', 'row_count', 'total_rows', 'shape.0']);
   const columns = metricValue(data, ['columns', 'column_count', 'total_columns', 'shape.1']);
-  const missing = metricValue(data, ['missing_values', 'missing', 'null_count', 'missing_count']);
+  const missingRaw = metricValue(data, ['missing_values', 'missing', 'null_count', 'missing_count']);
+  const missing = missingRaw && typeof missingRaw === 'object'
+    ? Object.values(missingRaw).reduce((total, value) => total + (Number(value) || 0), 0)
+    : missingRaw;
   const quality = metricValue(data, ['quality_score', 'data_quality', 'quality', 'score']);
   const metrics = { rows, columns, missing, quality };
   const labels = { rows: 'Rows', columns: 'Columns', missing: 'Missing values', quality: 'Data quality score' };
