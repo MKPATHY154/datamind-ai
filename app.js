@@ -1,5 +1,15 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
+const demoRevenueMarkup = {
+  actual: $('.actual-path').getAttribute('d'),
+  area: $('.area-path').getAttribute('d'),
+  forecast: $('.forecast-path').getAttribute('d'),
+  points: $('.chart-points').innerHTML,
+  yLabels: $('.y-labels').innerHTML,
+  xLabels: $('.x-labels').innerHTML,
+  ariaLabel: $('.revenue-chart').getAttribute('aria-label'),
+  insights: $('.insight-list').innerHTML
+};
 
 const showToast = (message) => { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2600); };
 
@@ -85,6 +95,61 @@ function animateMetric(element, nextValue, suffix = '') {
   requestAnimationFrame(tick);
 }
 
+const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+
+function formatChartValue(value) {
+  const amount = Math.abs(value);
+  if (amount >= 1000000) return `$${(value / 1000000).toFixed(amount >= 10000000 ? 0 : 1)}M`;
+  if (amount >= 1000) return `$${Math.round(value / 1000)}k`;
+  return `$${Math.round(value).toLocaleString()}`;
+}
+
+function renderRevenueChart(eda) {
+  const series = Array.isArray(eda && eda.series)
+    ? eda.series.map((point) => ({ label: point && point.label, value: Number(point && point.value) })).filter((point) => point.label && Number.isFinite(point.value))
+    : [];
+  if (!series.length) return false;
+
+  const width = 800;
+  const top = 18;
+  const bottom = 246;
+  const maxValue = Math.max(...series.map((point) => point.value), 0);
+  const chartMax = maxValue > 0 ? maxValue * 1.1 : 1;
+  const x = (index) => series.length === 1 ? width / 2 : (index / (series.length - 1)) * width;
+  const y = (value) => bottom - ((Math.max(value, 0) / chartMax) * (bottom - top));
+  const points = series.map((point, index) => `${x(index).toFixed(1)} ${y(point.value).toFixed(1)}`);
+  const linePath = `M${points.join(' L')}`;
+  const areaPath = `${linePath} L${x(series.length - 1).toFixed(1)} ${bottom} L0 ${bottom}Z`;
+
+  $('.actual-path').setAttribute('d', linePath);
+  $('.area-path').setAttribute('d', areaPath);
+  $('.forecast-path').setAttribute('d', '');
+  $('.forecast-path').setAttribute('aria-hidden', 'true');
+  $('.chart-points').innerHTML = series.map((point, index) => `<circle cx="${x(index).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="${index === series.length - 1 ? 5 : 3}"/>`).join('');
+  $('.y-labels').innerHTML = [4, 3, 2, 1, 0].map((step) => `<span>${escapeHtml(formatChartValue((chartMax * step) / 4))}</span>`).join('');
+  $('.x-labels').innerHTML = series.map((point) => `<span>${escapeHtml(point.label)}</span>`).join('');
+  $('.revenue-chart').setAttribute('aria-label', `Revenue chart for ${eda.value_column || 'the selected measure'} over time`);
+  return true;
+}
+
+function renderInsightCards(insights) {
+  if (!Array.isArray(insights) || !insights.length) return;
+  const colors = ['purple', 'orange', 'blue'];
+  $('.insight-list').innerHTML = insights.map((insight, index) => `<div class="insight-item"><div class="insight-mark ${colors[index % colors.length]}">${index === 1 ? '!' : index === 2 ? '↗' : '✦'}</div><div><strong>Data insight ${index + 1}</strong><p>${escapeHtml(insight)}</p><button class="text-button insight-action" type="button">Explore insight <span>→</span></button></div></div>`).join('');
+}
+
+function restoreDemoOverview() {
+  $('.actual-path').setAttribute('d', demoRevenueMarkup.actual);
+  $('.area-path').setAttribute('d', demoRevenueMarkup.area);
+  $('.forecast-path').setAttribute('d', demoRevenueMarkup.forecast);
+  $('.forecast-path').removeAttribute('aria-hidden');
+  $('.chart-points').innerHTML = demoRevenueMarkup.points;
+  $('.y-labels').innerHTML = demoRevenueMarkup.yLabels;
+  $('.x-labels').innerHTML = demoRevenueMarkup.xLabels;
+  $('.revenue-chart').setAttribute('aria-label', demoRevenueMarkup.ariaLabel);
+  $('.insight-list').innerHTML = demoRevenueMarkup.insights;
+}
+
 function renderProfileResults(profile, file) {
   const results = $('#profile-results');
   if (!results) return;
@@ -93,7 +158,6 @@ function renderProfileResults(profile, file) {
   const categorical = prep.categorical_columns || [];
   const datetime = prep.datetime_columns || [];
   const insights = profile.insights || [];
-  const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   results.innerHTML = `<article class="profile-card"><h3>${escapeHtml(profile.dataset_name || file.name)}</h3><p>Automated profile · cleaned metadata ready</p><div class="profile-stat-row"><div class="profile-stat"><strong>${Number(profile.row_count || 0).toLocaleString()}</strong><span>Rows</span></div><div class="profile-stat"><strong>${Number(profile.column_count || 0).toLocaleString()}</strong><span>Columns</span></div><div class="profile-stat"><strong>${Number(profile.quality_score || 0).toLocaleString()}%</strong><span>Quality</span></div></div><div class="profile-columns">${numeric.map((column) => `<span class="profile-column numeric">${escapeHtml(column)} · numeric</span>`).join('')}${categorical.map((column) => `<span class="profile-column">${escapeHtml(column)} · category</span>`).join('')}${datetime.map((column) => `<span class="profile-column datetime">${escapeHtml(column)} · date</span>`).join('')}</div></article><article class="profile-card"><h3>What DataMind found</h3><p>Signals generated from your first scan</p><div class="profile-insights">${insights.map((insight) => `<div class="profile-insight">${escapeHtml(insight)}</div>`).join('') || '<div class="profile-insight">Your dataset is ready for exploratory analysis.</div>'}</div></article>`;
   results.classList.add('visible');
 }
@@ -102,7 +166,8 @@ function updateOverview(profile, file) {
   const data = profile.profile || profile.metrics || profile.dataset || profile;
   const rows = metricValue(data, ['rows', 'row_count', 'total_rows', 'shape.0']);
   const columns = metricValue(data, ['columns', 'column_count', 'total_columns', 'shape.1']);
-  const missingRaw = metricValue(data, ['missing_values', 'missing', 'null_count', 'missing_count']);
+  const missingRaw = metricValue(data, ['missing_values', 'missing', 'null_count', 'missing_count'])
+    ?? metricValue(profile.preprocessing || {}, ['missing_values']);
   const missing = missingRaw && typeof missingRaw === 'object'
     ? Object.values(missingRaw).reduce((total, value) => total + (Number(value) || 0), 0)
     : missingRaw;
@@ -115,6 +180,8 @@ function updateOverview(profile, file) {
     animateMetric($(`[data-metric-value="${name}"]`), value, name === 'quality' ? ' /100' : '');
     $(`[data-metric-foot="${name}"]`).textContent = file.name;
   });
+  if (renderRevenueChart(profile.eda)) renderInsightCards(profile.insights);
+  else restoreDemoOverview();
   renderProfileResults(profile, file);
 }
 
@@ -152,7 +219,9 @@ fileInput.addEventListener('change', () => { const file = fileInput.files[0]; if
 ['#report-button', '#report-button-2'].forEach((id) => $(id).addEventListener('click', () => showToast('Your report is being generated — it will be ready shortly.')));
 $('#new-model').addEventListener('click', () => showToast('Model builder is ready for your next prediction target.'));
 $('#range-select').addEventListener('change', (event) => showToast(`Showing ${event.target.value.toLowerCase()}`));
-$$('.insight-action').forEach((button) => button.addEventListener('click', () => showToast('Opening a focused analysis of this insight.')));
+$('.insight-list').addEventListener('click', (event) => {
+  if (event.target.closest('.insight-action')) showToast('Opening a focused analysis of this insight.');
+});
 
 const chatResponses = {
   'why is revenue growing?': 'Revenue is up 18.4% over the last 90 days. Enterprise accounts are the main driver, contributing 62% of the increase, with the strongest lift coming from customers using three or more modules.',

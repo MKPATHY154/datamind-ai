@@ -92,7 +92,10 @@ def _coerce_datetime_columns(frame: pd.DataFrame) -> list[str]:
     datetime_columns: list[str] = []
     for name in frame.columns:
         series = frame[name]
-        if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_datetime64_any_dtype(series):
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        if pd.api.types.is_datetime64_any_dtype(series):
+            datetime_columns.append(str(name))
             continue
         parsed = pd.to_datetime(series, errors="coerce", format="mixed")
         non_empty = series.notna().sum()
@@ -100,6 +103,52 @@ def _coerce_datetime_columns(frame: pd.DataFrame) -> list[str]:
             frame[name] = parsed
             datetime_columns.append(str(name))
     return datetime_columns
+
+
+def _name_score(name: str, keywords: tuple[str, ...]) -> int:
+    normalized = "".join(character.lower() if character.isalnum() else " " for character in name)
+    return sum(2 if keyword in normalized.replace(" ", "") else 0 for keyword in keywords)
+
+
+def _eda_profile(
+    frame: pd.DataFrame,
+    datetime_columns: list[str],
+    numeric_columns: list[str],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Build a monthly value series when the dataset has time and measure fields."""
+    if not datetime_columns or not numeric_columns:
+        return None, []
+
+    date_column = max(
+        datetime_columns,
+        key=lambda name: (_name_score(name, ("saledate", "date", "datetime", "timestamp", "time")), -datetime_columns.index(name)),
+    )
+    value_column = max(
+        numeric_columns,
+        key=lambda name: (_name_score(name, ("saleamount", "sales", "revenue", "amount", "total", "value", "price")), -numeric_columns.index(name)),
+    )
+
+    usable = frame[[date_column, value_column]].dropna()
+    if usable.empty:
+        return None, []
+    monthly = usable.groupby(usable[date_column].dt.to_period("M"))[value_column].sum().sort_index()
+    if monthly.empty:
+        return None, []
+
+    series = [
+        {"label": period.strftime("%Y-%m"), "value": round(float(value), 2)}
+        for period, value in monthly.items()
+    ]
+    total = float(monthly.sum())
+    peak_period = monthly.idxmax()
+    peak_value = float(monthly.max())
+    trend = "upward" if len(monthly) > 1 and monthly.iloc[-1] > monthly.iloc[0] else "downward" if len(monthly) > 1 and monthly.iloc[-1] < monthly.iloc[0] else "flat"
+    insights = [
+        f"Total {value_column} across the detected period is {total:,.2f}.",
+        f"Peak monthly {value_column} was {peak_value:,.2f} in {peak_period.strftime('%B %Y')}.",
+        f"The monthly {value_column} trend is {trend} from {monthly.index[0].strftime('%B %Y')} to {monthly.index[-1].strftime('%B %Y')}.",
+    ]
+    return {"time_column": date_column, "value_column": value_column, "series": series}, insights
 
 
 def _insights(
@@ -178,8 +227,13 @@ async def profile_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
         0.0,
         round(100 - (missing_cells / total_cells * 70) - (duplicate_count / max(row_count, 1) * 30), 1),
     )
+    eda, eda_insights = _eda_profile(frame, datetime_columns, numeric_columns)
+    insights = _insights(frame, numeric_columns, categorical_columns, duplicate_count, missing_cells)
+    if eda_insights:
+        # Put the data-driven findings first so clients can show them prominently.
+        insights = (eda_insights + insights)[:4]
 
-    return {
+    response: dict[str, Any] = {
         "dataset_name": filename,
         "row_count": row_count,
         "column_count": column_count,
@@ -192,5 +246,8 @@ async def profile_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
             "datetime_columns": datetime_columns,
         },
         "column_summaries": [_column_summary(frame, str(column)) for column in frame.columns],
-        "insights": _insights(frame, numeric_columns, categorical_columns, duplicate_count, missing_cells),
+        "insights": insights,
     }
+    if eda is not None:
+        response["eda"] = eda
+    return response
