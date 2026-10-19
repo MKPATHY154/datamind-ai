@@ -19,6 +19,27 @@ const drawer = $('#copilot-drawer');
 $('#open-copilot').addEventListener('click', () => drawer.classList.add('open'));
 $('#close-copilot').addEventListener('click', () => drawer.classList.remove('open'));
 
+const profileButton = $('#profile-button');
+const profileMenu = $('#profile-menu');
+profileButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const isOpen = profileMenu.classList.toggle('open');
+  profileButton.setAttribute('aria-expanded', String(isOpen));
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.profile-menu-wrap')) {
+    profileMenu.classList.remove('open');
+    profileButton.setAttribute('aria-expanded', 'false');
+  }
+});
+$('#notifications-button').addEventListener('click', () => showToast('You are all caught up — no new notifications.'));
+$$('[data-profile-action]').forEach((item) => item.addEventListener('click', () => {
+  profileMenu.classList.remove('open');
+  profileButton.setAttribute('aria-expanded', 'false');
+  const action = item.dataset.profileAction;
+  showToast(action === 'logout' ? 'Sign out is not connected in this demo workspace.' : `${item.textContent.trim()} is ready for the next account integration.`);
+}));
+
 const fileInput = $('#file-input');
 const handleUpload = () => fileInput.click();
 $('#upload-trigger').addEventListener('click', handleUpload);
