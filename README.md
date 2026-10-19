@@ -43,7 +43,7 @@ The frontend posts uploads to `/api/datasets/profile`. When the static server an
 
 ## Deploy to Vercel
 
-This project is configured for Vercel: the static dashboard is served from the project root and `api/index.py` exposes the FastAPI application as a Python function. The `vercel.json` rewrite keeps both `/api/health` and `/api/datasets/profile` on the same FastAPI app.
+This project is configured for Vercel: the static dashboard is served from the project root and `api/index.py` exposes the FastAPI application as a Python function. The `vercel.json` routes keep both `/api/health` and `/api/datasets/profile` on the same FastAPI app while preserving the frontend at the root URL.
 
 From this folder, install the Vercel CLI if needed and deploy:
 
